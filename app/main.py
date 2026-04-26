@@ -21,7 +21,8 @@ from app.routers import (
     # attendance,    ← v1 PERMANENTLY DISABLED — DO NOT re-enable
     #                  Conflicts with attendance_v2 on the /attendance prefix,
     #                  causing duplicate route registration and broken endpoints.
-    posts, timetable, jobs, notifications,
+    posts, timetable, notifications,
+    # jobs,  # ← Placements disabled from Swagger — import kept for reference
 )
 from app.routers import faculty_timetable  # reads from faculty_db
 from app.routers import attendance_v2      # ← ONLY attendance router
@@ -121,7 +122,7 @@ app.include_router(posts.router)
 app.include_router(timetable.router)           # student timetable (student_db)
 app.include_router(faculty_timetable.router)   # faculty timetable (faculty_db)
 app.include_router(students_router)            # GET /students
-app.include_router(jobs.router)
+# app.include_router(jobs.router)  # ← Placements hidden from Swagger; files untouched
 app.include_router(notifications.router)
 
 # ── Root & Health ─────────────────────────────────────────────────────────────
