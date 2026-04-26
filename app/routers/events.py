@@ -10,6 +10,27 @@ from app.utils.files import save_upload_file
 router = APIRouter(prefix="/events", tags=["Events"])
 
 
+@router.post("/admin/create", response_model=EventResponse, status_code=status.HTTP_201_CREATED)
+def create_event_admin(
+    payload: CreateEventRequest,
+    db: Session = Depends(get_db),
+):
+    """Admin dev route: Create event without authentication."""
+    event = Event(
+        title=payload.title,
+        description=payload.description,
+        date=payload.date,
+        time=payload.time,
+        venue=payload.venue,
+        category=payload.category,
+        total_slots=payload.totalSlots,
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return EventResponse.from_orm_with_user(event, None)
+
+
 @router.post("", response_model=EventResponse, status_code=status.HTTP_201_CREATED)
 def create_event(
     payload: CreateEventRequest,
@@ -84,6 +105,37 @@ def get_events(
         .all()
     )
     return [EventResponse.from_orm_with_user(e, current_user.id) for e in events]
+
+
+@router.get("/admin/list-dev", response_model=List[EventResponse])
+def admin_list_events_dev(
+    category: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    upcoming: Optional[bool] = Query(None),
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """Admin dev route: Return all events without authentication."""
+    from datetime import date
+    query = db.query(Event)
+
+    if category:
+        query = query.filter(Event.category == category)
+    if search:
+        query = query.filter(
+            (Event.title.ilike(f"%{search}%")) | (Event.description.ilike(f"%{search}%"))
+        )
+    if upcoming is True:
+        query = query.filter(Event.date >= date.today())
+
+    events = (
+        query.order_by(Event.date.asc())
+        .offset((page - 1) * pageSize)
+        .limit(pageSize)
+        .all()
+    )
+    return [EventResponse.from_orm_with_user(e, None) for e in events]
 
 
 @router.get("/my-registrations", response_model=List[EventResponse])

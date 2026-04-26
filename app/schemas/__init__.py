@@ -1,11 +1,16 @@
 """
-All Pydantic schemas for UniVerse API.
-Response models use camelCase to be directly consumable by React frontends.
+app/schemas/__init__.py
+
+UniVerse — Pydantic v2 schemas.
+Response models use camelCase for direct React Native consumption.
+All new attendance schemas (mark, student fetch) are included here.
 """
 from __future__ import annotations
+
 from datetime import datetime, date, time
 from typing import Optional, List, Any
 from uuid import UUID
+
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from app.models import UserRole, AnnouncementType, EventCategory, AttendanceStatus, JobStatus
 
@@ -13,7 +18,7 @@ from app.models import UserRole, AnnouncementType, EventCategory, AttendanceStat
 # ─── Base Config ──────────────────────────────────────────────────────────────
 
 class CamelModel(BaseModel):
-    """Base model that serializes to camelCase for React frontend."""
+    """Base model that serialises to camelCase for the React Native frontend."""
     model_config = {
         "populate_by_name": True,
         "from_attributes": True,
@@ -48,53 +53,92 @@ class PaginatedResponse(BaseModel):
     totalPages: int
 
 
-# ─── AUTH SCHEMAS ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# AUTH SCHEMAS
+# ══════════════════════════════════════════════════════════════════════════════
 
 class RegisterRequest(BaseModel):
-    name: str = Field(..., min_length=2, max_length=200)
-    email: EmailStr
-    password: str = Field(..., min_length=6)
-    role: UserRole = UserRole.student
-    department: Optional[str] = None
-    year: Optional[int] = Field(None, ge=1, le=6)
-    section: Optional[str] = None
+    name:                str      = Field(..., min_length=2, max_length=200)
+    email:               EmailStr
+    password:            str      = Field(..., min_length=6)
+    role:                UserRole = UserRole.student
+    department:          Optional[str] = None
+    year:                Optional[int] = Field(None, ge=1, le=6)
+    section:             Optional[str] = None
     registration_number: Optional[str] = None
-    designation: Optional[str] = None
+    designation:         Optional[str] = None
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email:    EmailStr
     password: str
 
 
+class ProfileDataResponse(BaseModel):
+    """Minimal profile from the master database, returned alongside the token."""
+    name:   str
+    email:  str
+    branch: Optional[str] = None
+    year:   Optional[int] = None
+
+
 class TokenResponse(BaseModel):
-    accessToken: str
+    accessToken:  str
     refreshToken: str
-    tokenType: str = "Bearer"
-    user: "UserProfileResponse"
+    tokenType:    str = "Bearer"
+    user:         "UserProfileResponse"
+    login_status: Optional[str] = Field(None, alias="loginStatus")
+    profile:      Optional[ProfileDataResponse] = None
 
 
 class RefreshTokenRequest(BaseModel):
     refreshToken: str
 
 
-# ─── USER SCHEMAS ─────────────────────────────────────────────────────────────
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(..., min_length=6)
+    new_password: str = Field(..., min_length=6)
+
+
+class EmailOnlyRequest(BaseModel):
+    email: EmailStr
+
+
+class VerifyOtpRequest(BaseModel):
+    email: EmailStr
+    otp:   str = Field(..., min_length=6, max_length=6)
+
+
+class ResetPasswordRequest(BaseModel):
+    email:        EmailStr
+    otp:          str = Field(..., min_length=6, max_length=6)
+    new_password: str = Field(..., min_length=6)
+
+
+class GoogleLoginRequest(BaseModel):
+    id_token: str = Field(..., alias="idToken")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# USER SCHEMAS
+# ══════════════════════════════════════════════════════════════════════════════
 
 class UserProfileResponse(CamelModel):
-    id: UUID
-    name: str
-    email: str
-    role: UserRole
-    avatar_url: Optional[str] = Field(None, alias="avatarUrl")
-    is_active: bool = Field(True, alias="isActive")
-    created_at: datetime = Field(alias="createdAt")
+    id:         UUID
+    name:       str
+    email:      str
+    role:       UserRole
+    avatar_url: Optional[str]   = Field(None, alias="avatarUrl")
+    nickname:   Optional[str]   = None          # short display name from master DB
+    is_active:  bool            = Field(True,  alias="isActive")
+    created_at: datetime        = Field(alias="createdAt")
 
     # Student fields
-    department: Optional[str] = None
-    year: Optional[int] = None
-    section: Optional[str] = None
-    registration_number: Optional[str] = Field(None, alias="registrationNumber")
-    overall_attendance: Optional[float] = Field(None, alias="overallAttendance")
+    department:          Optional[str]   = None
+    year:                Optional[int]   = None
+    section:             Optional[str]   = None
+    registration_number: Optional[str]   = Field(None, alias="registrationNumber")
+    overall_attendance:  Optional[float] = Field(None, alias="overallAttendance")
 
     # Faculty fields
     designation: Optional[str] = None
@@ -103,37 +147,39 @@ class UserProfileResponse(CamelModel):
 
 
 class UpdateProfileRequest(BaseModel):
-    name: Optional[str] = Field(None, min_length=2, max_length=200)
-    department: Optional[str] = None
-    year: Optional[int] = Field(None, ge=1, le=6)
-    section: Optional[str] = None
+    name:        Optional[str] = Field(None, min_length=2, max_length=200)
+    department:  Optional[str] = None
+    year:        Optional[int] = Field(None, ge=1, le=6)
+    section:     Optional[str] = None
     designation: Optional[str] = None
 
 
 class AdminUpdateUserRequest(UpdateProfileRequest):
-    is_active: Optional[bool] = None
-    role: Optional[UserRole] = None
+    is_active: Optional[bool]     = None
+    role:      Optional[UserRole] = None
 
 
-# ─── ANNOUNCEMENT SCHEMAS ─────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# ANNOUNCEMENT SCHEMAS
+# ══════════════════════════════════════════════════════════════════════════════
 
 class CreateAnnouncementRequest(BaseModel):
-    title: str = Field(..., min_length=3, max_length=300)
-    body: str = Field(..., min_length=10)
-    type: AnnouncementType = AnnouncementType.general
-    date: Optional[date] = None
-    isUrgent: bool = False
+    title:    str              = Field(..., min_length=3, max_length=200)
+    body:     str              = Field(..., min_length=10)
+    type:     AnnouncementType = AnnouncementType.general
+    date:     Optional[date]   = None
+    isUrgent: bool             = False
 
 
 class AnnouncementResponse(BaseModel):
-    """Matches frontend: { id, title, body, type, date, urgent }"""
-    id: UUID
-    title: str
-    body: str
-    type: str
-    date: date
-    urgent: bool  # Frontend uses 'urgent' not 'isUrgent'
-    createdBy: Optional[str] = None  # creator name
+    """Matches frontend shape: { id, title, body, type, date, urgent, createdBy }"""
+    id:        UUID
+    title:     str
+    body:      str
+    type:      str
+    date:      date
+    urgent:    bool             # frontend uses 'urgent', not 'isUrgent'
+    createdBy: Optional[str] = None
 
     model_config = {"from_attributes": False}
 
@@ -150,31 +196,33 @@ class AnnouncementResponse(BaseModel):
         )
 
 
-# ─── EVENT SCHEMAS ────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# EVENT SCHEMAS
+# ══════════════════════════════════════════════════════════════════════════════
 
 class CreateEventRequest(BaseModel):
-    title: str = Field(..., min_length=3, max_length=300)
+    title:       str            = Field(..., min_length=3, max_length=300)
     description: Optional[str] = None
-    date: date
-    time: time
-    venue: Optional[str] = None
-    category: EventCategory = EventCategory.technical
-    totalSlots: int = Field(100, ge=1)
+    date:        date
+    time:        time
+    venue:       Optional[str] = None
+    category:    EventCategory  = EventCategory.technical
+    totalSlots:  int            = Field(100, ge=1)
 
 
 class EventResponse(BaseModel):
-    """Matches frontend: { id, title, date, time, venue, description, category, registered }"""
-    id: UUID
-    title: str
-    date: date
-    time: time
-    venue: Optional[str]
-    description: Optional[str]
-    category: str
-    registered: bool  # Whether current user is registered
-    totalSlots: int
+    """Matches frontend shape: { id, title, date, time, venue, description, category, registered, … }"""
+    id:              UUID
+    title:           str
+    date:            date
+    time:            time
+    venue:           Optional[str]
+    description:     Optional[str]
+    category:        str
+    registered:      bool         # whether the current user is registered
+    totalSlots:      int
     registeredCount: int
-    createdBy: Optional[str] = None
+    createdBy:       Optional[str] = None
 
     model_config = {"from_attributes": False}
 
@@ -198,26 +246,32 @@ class EventResponse(BaseModel):
         )
 
 
-# ─── ATTENDANCE SCHEMAS ───────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# ATTENDANCE SCHEMAS
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Legacy / existing schemas (kept for backward compat with existing router) ─
 
 class MarkAttendanceRequest(BaseModel):
+    """Single-student mark — used by the original /attendance endpoints."""
     studentId: UUID
-    subject: str
-    date: date
-    status: AttendanceStatus
+    subject:   str
+    date:      date
+    status:    AttendanceStatus
 
 
 class BulkMarkAttendanceRequest(BaseModel):
+    """Bulk mark — used by /attendance/bulk."""
     subject: str
-    date: date
-    records: List[dict]  # [{registration_number, present}]
+    date:    date
+    records: List[dict]     # [{registration_number, present}]
 
 
 class AttendanceResponse(BaseModel):
-    """Matches frontend: { subject, present, total, percentage }"""
-    subject: str
-    present: int
-    total: int
+    """Subject-wise running totals — { subject, present, total, percentage }"""
+    subject:    str
+    present:    int
+    total:      int
     percentage: float
 
     model_config = {"from_attributes": False}
@@ -233,12 +287,13 @@ class AttendanceResponse(BaseModel):
 
 
 class DayAttendanceResponse(BaseModel):
-    id: UUID
-    registrationNumber: str      # CHANGED from studentId: UUID
-    date: date
-    subject: str
-    status: str
-    markedBy: Optional[str] = None
+    """One day-level record returned to the frontend."""
+    id:                 UUID
+    registrationNumber: str       # was studentId: UUID — supports unregistered students
+    date:               date
+    subject:            str
+    status:             str
+    markedBy:           Optional[str] = None
 
     model_config = {"from_attributes": False}
 
@@ -246,7 +301,7 @@ class DayAttendanceResponse(BaseModel):
     def from_orm(cls, obj: Any) -> "DayAttendanceResponse":
         return cls(
             id=obj.id,
-            registrationNumber=obj.registration_number,   # CHANGED from obj.student_id
+            registrationNumber=obj.registration_number,
             date=obj.date,
             subject=obj.subject,
             status=obj.status.value if hasattr(obj.status, "value") else obj.status,
@@ -255,13 +310,148 @@ class DayAttendanceResponse(BaseModel):
 
 
 class AttendanceSummaryResponse(BaseModel):
-    studentId: str        # CHANGED: str instead of UUID to support unregistered students
-    studentName: str
+    studentId:         str          # str (not UUID) — supports unregistered students
+    studentName:       str
     overallPercentage: float
-    subjects: List[AttendanceResponse]
+    subjects:          List[AttendanceResponse]
 
 
-# ─── POST / SOCIAL FEED SCHEMAS ───────────────────────────────────────────────
+# ── New schemas for POST /attendance/mark and GET /attendance/student/{id} ────
+
+class AttendanceRecord(BaseModel):
+    """
+    One student's status inside a bulk-mark request.
+    Used by AttendanceMarkRequest below.
+    """
+    student_id: str = Field(
+        ...,
+        min_length=1,
+        description="Student registration number, e.g. '22B01A1234'",
+    )
+    status: str = Field(..., description="'present' or 'absent'")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in ("present", "absent"):
+            raise ValueError("status must be 'present' or 'absent'")
+        return v
+
+    @field_validator("student_id")
+    @classmethod
+    def validate_student_id(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("student_id cannot be blank")
+        return v
+
+
+class AttendanceMarkRequest(BaseModel):
+    """
+    Payload for POST /attendance/mark.
+
+    Example
+    -------
+    {
+        "section_id": "CSE06",
+        "subject":    "Data Structures",
+        "date":       "2026-04-19",
+        "time_slot":  "9:00-10:40",
+        "year":       2,
+        "attendance": [
+            { "student_id": "22B01A1234", "status": "present" },
+            { "student_id": "22B01A1235", "status": "absent"  }
+        ]
+    }
+    """
+    section_id: str            = Field(..., min_length=1, description="Section code, e.g. 'CSE06'")
+    subject:    str            = Field(..., min_length=1, max_length=200)
+    date:       date
+    time_slot:  Optional[str]  = Field(None, description="Period string, e.g. '9:00-10:40'")
+    year:       Optional[int]  = Field(None, ge=1, le=6)
+    attendance: List[AttendanceRecord] = Field(..., min_length=1)
+
+    @field_validator("section_id")
+    @classmethod
+    def normalise_section(cls, v: str) -> str:
+        """'CSE 06' → 'CSE06'"""
+        return v.replace(" ", "").upper()
+
+    @field_validator("subject")
+    @classmethod
+    def strip_subject(cls, v: str) -> str:
+        return v.strip()
+
+
+class AttendanceMarkResponse(BaseModel):
+    """Return value for POST /attendance/mark."""
+    message: str
+    success: bool = True
+    created: int  = Field(..., description="New records inserted")
+    updated: int  = Field(..., description="Existing records updated (status changed)")
+    skipped: int  = Field(..., description="Records with no change (skipped)")
+
+
+class SubjectSummaryItem(BaseModel):
+    """Running totals per subject — used inside StudentAttendanceResponse."""
+    subject:    str
+    present:    int
+    total:      int
+    percentage: float
+
+
+class DayAttendanceItem(BaseModel):
+    """One class entry in a student's day-wise list."""
+    date:      date
+    subject:   str
+    time_slot: Optional[str]
+    status:    str              # "present" | "absent"
+    section:   Optional[str]   = None
+    marked_by: Optional[str]   = None
+
+    model_config = {"from_attributes": False}
+
+    @classmethod
+    def from_orm(cls, obj: Any) -> "DayAttendanceItem":
+        return cls(
+            date=obj.date,
+            subject=obj.subject,
+            time_slot=getattr(obj, "time_slot", None),
+            status=(
+                obj.status.value
+                if hasattr(obj.status, "value")
+                else str(obj.status)
+            ),
+            section=getattr(obj, "section", None),
+            marked_by=obj.faculty.name if getattr(obj, "faculty", None) else None,
+        )
+
+
+class StudentAttendanceResponse(BaseModel):
+    """
+    Full attendance payload for GET /attendance/student/{student_id}.
+
+    Fields
+    ------
+    registration_number  – the queried student's reg number
+    overall_percentage   – aggregate across all subjects (unfiltered)
+    total_classes        – total across all subjects
+    attended_classes     – present count across all subjects
+    subjects             – per-subject breakdown (always full totals)
+    records              – day-wise list (filtered by month/year if requested)
+    """
+    registration_number: str
+    overall_percentage:  float
+    total_classes:       int
+    attended_classes:    int
+    subjects:            List[SubjectSummaryItem]
+    records:             List[DayAttendanceItem]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# POST / SOCIAL FEED SCHEMAS
+# ══════════════════════════════════════════════════════════════════════════════
 
 class CreatePostRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=5000)
@@ -272,10 +462,10 @@ class CommentRequest(BaseModel):
 
 
 class CommentResponse(BaseModel):
-    id: UUID
-    userName: str
-    userRole: str
-    content: str
+    id:         UUID
+    userName:   str
+    userRole:   str
+    content:    str
     timePosted: str
 
     model_config = {"from_attributes": False}
@@ -293,15 +483,15 @@ class CommentResponse(BaseModel):
 
 class PostResponse(BaseModel):
     """Matches frontend: { id, userName, userRole, content, timePosted, likes, comments }"""
-    id: UUID
-    userName: str
-    userRole: str
-    content: str
+    id:         UUID
+    userName:   str
+    userRole:   str
+    content:    str
     timePosted: str
-    likes: int
-    comments: int
+    likes:      int
+    comments:   int
     userAvatar: Optional[str] = None
-    isLiked: bool = False  # whether current user liked it
+    isLiked:    bool          = False
 
     model_config = {"from_attributes": False}
 
@@ -323,31 +513,33 @@ class PostResponse(BaseModel):
         )
 
 
-# ─── TIMETABLE SCHEMAS ────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# TIMETABLE SCHEMAS
+# ══════════════════════════════════════════════════════════════════════════════
 
 class CreateTimetableRequest(BaseModel):
-    day: str = Field(..., description="Monday, Tuesday, ...")
-    subject: str
-    startTime: time
-    endTime: time
-    facultyId: Optional[UUID] = None
-    room: Optional[str] = None
-    department: Optional[str] = None
-    section: Optional[str] = None
-    year: Optional[int] = None
+    day:        str            = Field(..., description="Monday, Tuesday, …")
+    subject:    str
+    startTime:  time
+    endTime:    time
+    facultyId:  Optional[UUID] = None
+    room:       Optional[str]  = None
+    department: Optional[str]  = None
+    section:    Optional[str]  = None
+    year:       Optional[int]  = None
 
 
 class TimetableResponse(BaseModel):
-    id: UUID
-    day: str
-    subject: str
-    startTime: str
-    endTime: str
+    id:          UUID
+    day:         str
+    subject:     str
+    startTime:   str
+    endTime:     str
     facultyName: Optional[str] = None
-    room: Optional[str] = None
-    department: Optional[str] = None
-    section: Optional[str] = None
-    year: Optional[int] = None
+    room:        Optional[str] = None
+    department:  Optional[str] = None
+    section:     Optional[str] = None
+    year:        Optional[int] = None
 
     model_config = {"from_attributes": False}
 
@@ -367,26 +559,28 @@ class TimetableResponse(BaseModel):
         )
 
 
-# ─── JOB SCHEMAS ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# JOB SCHEMAS
+# ══════════════════════════════════════════════════════════════════════════════
 
 class CreateJobRequest(BaseModel):
-    companyName: str = Field(..., min_length=2)
-    role: str
-    package: Optional[str] = None
-    deadline: date
-    description: Optional[str] = None
+    companyName: str            = Field(..., min_length=2)
+    role:        str
+    package:     Optional[str]  = None
+    deadline:    date
+    description: Optional[str]  = None
 
 
 class JobResponse(BaseModel):
-    id: UUID
-    companyName: str
-    role: str
-    package: Optional[str]
-    deadline: date
-    description: Optional[str]
-    status: str
-    applied: bool = False
-    applicantCount: int = 0
+    id:             UUID
+    companyName:    str
+    role:           str
+    package:        Optional[str]
+    deadline:       date
+    description:    Optional[str]
+    status:         str
+    applied:        bool = False
+    applicantCount: int  = 0
 
     model_config = {"from_attributes": False}
 
@@ -408,13 +602,15 @@ class JobResponse(BaseModel):
         )
 
 
-# ─── NOTIFICATION SCHEMAS ─────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# NOTIFICATION SCHEMAS
+# ══════════════════════════════════════════════════════════════════════════════
 
 class NotificationResponse(BaseModel):
-    id: UUID
-    title: str
-    message: str
-    isRead: bool
+    id:        UUID
+    title:     str
+    message:   str
+    isRead:    bool
     createdAt: str
 
     model_config = {"from_attributes": False}

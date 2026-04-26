@@ -1,6 +1,7 @@
 from typing import Optional, List
 from datetime import date as date_type
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User, Announcement, UserRole
@@ -8,6 +9,33 @@ from app.schemas import CreateAnnouncementRequest, AnnouncementResponse, Message
 from app.auth.dependencies import get_current_user, require_faculty_or_admin, require_admin
 
 router = APIRouter(prefix="/announcements", tags=["Announcements"])
+
+
+class AdminAnnouncementResponse(BaseModel):
+    id: str
+    title: str
+    content: str
+    created_at: str
+
+    class Config:
+        from_attributes = True
+
+
+class AdminAnnouncementPayload(BaseModel):
+    title: str
+    content: str
+
+
+def _serialize(a: Announcement) -> AdminAnnouncementResponse:
+    """Convert an Announcement ORM row to AdminAnnouncementResponse.
+    Maps: a.message → content (DO NOT use a.content).
+    """
+    return AdminAnnouncementResponse(
+        id=str(a.id),
+        title=a.title,
+        content=a.body,
+        created_at=str(a.created_at),
+    )
 
 
 @router.post("", response_model=AnnouncementResponse, status_code=status.HTTP_201_CREATED)
@@ -27,9 +55,6 @@ def create_announcement(
     )
     db.add(announcement)
     db.commit()
-    db.refresh(announcement)
-
-    # Reload with relationship
     db.refresh(announcement)
     announcement = db.query(Announcement).filter(Announcement.id == announcement.id).first()
     return AnnouncementResponse.from_orm(announcement)
@@ -89,7 +114,72 @@ def delete_announcement(
     ann = db.query(Announcement).filter(Announcement.id == announcement_id).first()
     if not ann:
         raise HTTPException(status_code=404, detail="Announcement not found")
-
     db.delete(ann)
     db.commit()
     return MessageResponse(message="Announcement deleted")
+
+
+# ─── Admin Dev Routes (no auth) ───────────────────────────────────────────────
+
+@router.get("/admin/list-dev", response_model=List[AdminAnnouncementResponse])
+def admin_list_announcements(db: Session = Depends(get_db)):
+    """[DEV] Get all announcements sorted by created_at DESC."""
+    announcements = (
+        db.query(Announcement)
+        .order_by(Announcement.created_at.desc())
+        .all()
+    )
+    return [_serialize(a) for a in announcements]
+
+
+@router.post("/admin/create-dev", response_model=AdminAnnouncementResponse, status_code=status.HTTP_201_CREATED)
+def admin_create_announcement(
+    payload: AdminAnnouncementPayload,
+    db: Session = Depends(get_db),
+):
+    """[DEV] Create announcement without auth.
+    Stores payload.content into the 'message' column.
+    """
+    ann = Announcement(
+        title=payload.title,
+        body=payload.content,
+    )
+    db.add(ann)
+    db.commit()
+    db.refresh(ann)
+    return _serialize(ann)
+
+
+@router.put("/admin/update-dev/{announcement_id}", response_model=AdminAnnouncementResponse)
+def admin_update_announcement(
+    announcement_id: str,
+    payload: AdminAnnouncementPayload,
+    db: Session = Depends(get_db),
+):
+    """[DEV] Update announcement without auth.
+    Updates title and message (mapped from payload.content).
+    """
+    ann = db.query(Announcement).filter(Announcement.id == announcement_id).first()
+    if not ann:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+
+    ann.title = payload.title
+    ann.message = payload.content
+    db.commit()
+    db.refresh(ann)
+    return _serialize(ann)
+
+
+@router.delete("/admin/delete-dev/{announcement_id}")
+def admin_delete_announcement(
+    announcement_id: str,
+    db: Session = Depends(get_db),
+):
+    """[DEV] Delete announcement without auth."""
+    ann = db.query(Announcement).filter(Announcement.id == announcement_id).first()
+    if not ann:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+
+    db.delete(ann)
+    db.commit()
+    return {"message": "Announcement deleted"}

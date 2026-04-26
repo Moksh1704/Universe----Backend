@@ -16,7 +16,16 @@ from app.database import engine, Base
 import app.models  # noqa: F401
 
 # ── Import routers ────────────────────────────────────────────────────────────
-from app.routers import auth, users, announcements, events, attendance, posts, timetable, jobs, notifications
+from app.routers import (
+    auth, users, announcements, events,
+    # attendance,    ← v1 PERMANENTLY DISABLED — DO NOT re-enable
+    #                  Conflicts with attendance_v2 on the /attendance prefix,
+    #                  causing duplicate route registration and broken endpoints.
+    posts, timetable, jobs, notifications,
+)
+from app.routers import faculty_timetable  # reads from faculty_db
+from app.routers import attendance_v2      # ← ONLY attendance router
+from app.routers.students import router as students_router  # GET /students
 
 # ── Create upload directory ───────────────────────────────────────────────────
 Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
@@ -35,7 +44,7 @@ A production-ready backend for managing university operations including:
 - **Users** – Student & Faculty profiles with role-based access
 - **Announcements** – Exam, holiday, result, and general notices
 - **Events** – Campus events with registration management
-- **Attendance** – Subject-wise and day-wise attendance tracking
+- **Attendance** – Subject-wise and day-wise attendance tracking (v2 only)
 - **Social Feed** – Posts, likes, and comments
 - **Timetable** – Class schedules for students and faculty
 - **Placements** – Job listings and student applications
@@ -44,6 +53,17 @@ A production-ready backend for managing university operations including:
 ### Authentication
 All endpoints (except `/auth/register` and `/auth/login`) require a Bearer token.
 Get your token from `POST /auth/login`, then use `Authorization: Bearer <token>`.
+
+### Attendance (v2 — all attendance traffic)
+- `POST /attendance/mark`              — Faculty/Admin: mark attendance for a session
+- `GET  /attendance/faculty/students`  — Faculty/Admin: get student list for a section
+- `GET  /attendance/faculty/schedule`  — Faculty/Admin: get timetable/schedule slots
+- `GET  /attendance/check`             — Faculty/Admin: check if attendance already marked
+- `GET  /attendance/student/{id}`      — Student (own) or Faculty/Admin (any)
+- `GET  /attendance/me`                — Student: subject-wise attendance
+- `GET  /attendance/me/overview`       — Student: full attendance overview
+- `GET  /attendance/me/daily`          — Student: day-wise records
+- `GET  /attendance/me/summary`        — Student: summary with overall percentage
     """,
     version=settings.APP_VERSION,
     docs_url="/docs",
@@ -54,7 +74,7 @@ Get your token from `POST /auth/login`, then use `Authorization: Bearer <token>`
 # ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # for now
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -90,9 +110,17 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(announcements.router)
 app.include_router(events.router)
-app.include_router(attendance.router)
+
+# ⚠️  attendance.router (v1) is INTENTIONALLY NOT registered here.
+#     It shares the /attendance prefix with attendance_v2 and will cause
+#     duplicate-route conflicts and broken behavior if re-added.
+#     All attendance traffic is handled exclusively by attendance_v2.router.
+app.include_router(attendance_v2.router)   # ← ONLY attendance router
+
 app.include_router(posts.router)
-app.include_router(timetable.router)
+app.include_router(timetable.router)           # student timetable (student_db)
+app.include_router(faculty_timetable.router)   # faculty timetable (faculty_db)
+app.include_router(students_router)            # GET /students
 app.include_router(jobs.router)
 app.include_router(notifications.router)
 
