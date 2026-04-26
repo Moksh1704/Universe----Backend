@@ -21,7 +21,8 @@ _ENGINE_KWARGS = dict(
     pool_size=5,
     max_overflow=10,
     connect_args={
-        "connect_timeout": 10, # seconds before giving up on a new connection
+        "connect_timeout": 10,
+         "sslmode": "require",   # seconds before giving up on a new connection
     },
 )
 
