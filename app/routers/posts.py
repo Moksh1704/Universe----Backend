@@ -2,7 +2,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, field_validator
-from datetime import datetime
+from datetime import datetime, timezone  # ← added timezone
 
 from app.database import get_db, get_master_db
 from app.models import User, Post, MasterStudent
@@ -42,7 +42,11 @@ class ChatMessageResponse(BaseModel):
     is_deleted: bool
     deleted_by: Optional[str] = None
 
-    model_config = {"from_attributes": True}
+    model_config = {
+        "from_attributes": True,
+        # ← Always serialize datetime as ISO 8601 with Z suffix
+        "json_encoders": {datetime: lambda dt: dt.strftime("%Y-%m-%dT%H:%M:%SZ")},
+    }
 
     @classmethod
     def from_post(cls, post: Post, master_db: Session = None) -> "ChatMessageResponse":
@@ -66,6 +70,12 @@ class ChatMessageResponse(BaseModel):
             message = post.content
         # ─────────────────────────────────────────────────────────────────────
 
+        # ── Normalize naive DB timestamp → UTC-aware ──────────────────────────
+        created_at = post.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        # ─────────────────────────────────────────────────────────────────────
+
         # ── Debug log ─────────────────────────────────────────────────────────
         print("DEBUG MESSAGE:")
         print({
@@ -82,7 +92,7 @@ class ChatMessageResponse(BaseModel):
             user_id=str(post.user_id),
             user_name=user_name,
             message=message,
-            created_at=post.created_at,
+            created_at=created_at,   # ← always UTC-aware
             is_deleted=post.is_deleted,
             deleted_by=post.deleted_by,
         )
@@ -136,7 +146,7 @@ def admin_delete_post_dev(
 
     post.is_deleted = True
     post.deleted_by = "admin"
-    post.deleted_at = datetime.utcnow()
+    post.deleted_at = datetime.now(timezone.utc)  # ← was datetime.utcnow()
     db.commit()
 
     return MessageResponse(message="Message deleted by admin.")
@@ -232,7 +242,7 @@ def delete_post(
     # ── Soft delete — never remove the row from the database ─────────────────
     post.is_deleted = True
     post.deleted_by = "admin" if current_user.role == UserRole.admin else "user"
-    post.deleted_at = datetime.utcnow()
+    post.deleted_at = datetime.now(timezone.utc)  # ← was datetime.utcnow()
     db.commit()
     # ─────────────────────────────────────────────────────────────────────────
 
