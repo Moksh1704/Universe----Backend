@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Optional
 import smtplib
+import re
 from email.mime.text import MIMEText
 import secrets
 
@@ -13,15 +14,53 @@ from app.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# Matches a valid bcrypt hash — exactly 60 characters, correct prefix and structure.
+# Used in verify_password to catch malformed/truncated hashes before passlib
+# throws a misleading "password cannot be longer than 72 bytes" error.
+_BCRYPT_RE = re.compile(r"^\$2[abxy]\$\d{2}\$.{53}$")
+
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password[:72])
+    # Encode to bytes FIRST, then slice to 72 bytes.
+    #
+    # The original code did password[:72] which slices on characters, not bytes.
+    # Multi-byte Unicode characters (e.g. accented letters, emoji) each occupy
+    # 2–4 bytes, so a string that is ≤72 chars can still exceed 72 bytes and
+    # cause passlib to raise "password cannot be longer than 72 bytes".
+    #
+    # Encoding first and slicing the byte array guarantees we never exceed
+    # bcrypt's hard limit regardless of what characters the password contains.
+    return pwd_context.hash(password.encode("utf-8")[:72])
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Securely compare a plain password against a bcrypt hash."""
+    """
+    Securely compare a plain password against a bcrypt hash.
+
+    Before calling passlib, validates that the stored hash is structurally
+    correct (60 chars, valid bcrypt prefix). If the hash is malformed or
+    truncated, passlib raises a misleading "password cannot be longer than
+    72 bytes" error instead of a clear one. This guard catches that case,
+    logs a diagnostic line to Render logs, and returns False (clean 401)
+    instead of crashing with a 500.
+    """
     if not hashed_password:
         return False
+
+    # ── Hash integrity check ──────────────────────────────────────────────────
+    if not _BCRYPT_RE.match(hashed_password):
+        print(
+            f"[AUTH ERROR] Malformed bcrypt hash detected in DB.\n"
+            f"  → hash length : {len(hashed_password)} (expected 60)\n"
+            f"  → hash prefix : {hashed_password[:7]!r}\n"
+            f"  → Action      : This user's hashed_password column is corrupted or\n"
+            f"                  truncated. Reset their password manually via the\n"
+            f"                  recovery script or ask them to use Forgot Password.",
+            flush=True,
+        )
+        return False  # returns clean 401 to client — no 500, no stack trace
+    # ─────────────────────────────────────────────────────────────────────────
+
     return pwd_context.verify(plain_password, hashed_password)
 
 

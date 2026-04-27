@@ -2,6 +2,8 @@
 UniVerse – University Management Platform
 FastAPI Backend  |  REST API  |  JWT Auth  |  PostgreSQL
 """
+import re
+import sys
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +13,42 @@ from pathlib import Path
 
 from app.config import settings
 from app.database import engine, Base
+
+# ── Startup validation ────────────────────────────────────────────────────────
+# Catches the most common Render misconfiguration: setting DEFAULT_PASSWORD or
+# FACULTY_DEFAULT_PASSWORD to a bcrypt hash string instead of a plain password.
+# This causes passlib to raise "password cannot be longer than 72 bytes" at
+# runtime and corrupts every user row created during the affected window.
+
+_BCRYPT_RE = re.compile(r"^\$2[abxy]\$\d{2}\$.{53}$")
+
+
+def _validate_plain_password(name: str, value: str) -> None:
+    """Abort at boot if a password env var looks like a bcrypt hash or is too long."""
+    if not value:
+        print(f"[STARTUP WARNING] {name} is empty — default password will be blank!", flush=True)
+        return
+    if _BCRYPT_RE.match(value):
+        print(
+            f"[STARTUP FATAL] {name} is a bcrypt hash, not a plain password.\n"
+            f"  → Go to Render › Environment and set {name} to a plain string like 'Uni123'.\n"
+            f"  → Never store pre-hashed values here; hashing is done at runtime.",
+            flush=True,
+        )
+        sys.exit(1)
+    byte_len = len(value.encode("utf-8"))
+    if byte_len > 72:
+        print(
+            f"[STARTUP FATAL] {name} is {byte_len} bytes — exceeds bcrypt's 72-byte hard limit.\n"
+            f"  → Shorten the value in Render › Environment to ≤ 72 bytes.",
+            flush=True,
+        )
+        sys.exit(1)
+    print(f"[STARTUP OK] {name} looks valid ({byte_len} bytes)", flush=True)
+
+
+_validate_plain_password("DEFAULT_PASSWORD", settings.DEFAULT_PASSWORD)
+_validate_plain_password("FACULTY_DEFAULT_PASSWORD", settings.FACULTY_DEFAULT_PASSWORD)
 
 # ── Import all models so SQLAlchemy can create tables ────────────────────────
 import app.models  # noqa: F401
@@ -73,9 +111,12 @@ Get your token from `POST /auth/login`, then use `Authorization: Bearer <token>`
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
+# Uses the explicit allowlist from settings instead of wildcard "*".
+# allow_origins=["*"] combined with allow_credentials=True is rejected by
+# browsers per the CORS spec and can cause silent auth failures in Expo/web.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.allowed_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -95,6 +136,8 @@ async def integrity_error_handler(request: Request, exc: IntegrityError):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    # DEBUG=true in .env exposes traces locally; production always returns a
+    # generic message so internal details are never leaked to clients.
     if settings.DEBUG:
         import traceback
         return JSONResponse(
@@ -105,6 +148,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"detail": "An internal server error occurred.", "success": False},
     )
+
 
 # ── Register Routers ──────────────────────────────────────────────────────────
 app.include_router(auth.router)
