@@ -4,6 +4,7 @@ FastAPI Backend  |  REST API  |  JWT Auth  |  PostgreSQL
 """
 import re
 import sys
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -69,12 +70,34 @@ from app.routers.students import router as students_router  # GET /students
 # ── Create upload directory ───────────────────────────────────────────────────
 Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
 
-# ── Create DB tables (use Alembic migrations in production) ───────────────────
-Base.metadata.create_all(bind=engine)
+# ── Lifespan: DB table creation moved here from module level ─────────────────
+# CRITICAL FIX: create_all() must NOT run at module import time.
+# When DATABASE URLs are missing or invalid, calling create_all() at module
+# level causes SQLAlchemy to raise an unhandled exception during uvicorn's
+# import phase — before any request context exists. Uvicorn catches this as a
+# fatal error, logs "Shutting down", and restarts. Moving it into lifespan
+# ensures it runs after env vars are loaded and produces a clean error message.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ── Startup ───────────────────────────────────────────────────────────────
+    try:
+        Base.metadata.create_all(bind=engine)
+        print("[STARTUP OK] Database tables verified.", flush=True)
+    except Exception as e:
+        print(
+            f"[STARTUP FATAL] Could not create/verify DB tables: {e}\n"
+            f"  → Check that STUDENT_DATABASE_URL is set correctly in Render › Environment.",
+            flush=True,
+        )
+        sys.exit(1)
+    yield
+    # ── Shutdown (nothing needed) ─────────────────────────────────────────────
+
 
 # ── FastAPI App ───────────────────────────────────────────────────────────────
 app = FastAPI(
     title="UniVerse API",
+    lifespan=lifespan,   # ← lifespan replaces the bare create_all call
     description="""
 ## 🎓 UniVerse – University Management System
 
