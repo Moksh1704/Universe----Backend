@@ -304,7 +304,7 @@ class EventResponse(BaseModel):
     createdBy:       Optional[str] = None
     formUrl:         Optional[str] = None   # Google Form link surfaced to both admin UI and mobile app
 
-    model_config = {"from_attributes": False}
+    model_config = {"from_attributes": True}
 
     @classmethod
     def from_orm_with_user(cls, obj: Any, user_id: Optional[UUID] = None) -> "EventResponse":
