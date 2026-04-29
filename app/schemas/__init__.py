@@ -206,8 +206,23 @@ class CreateEventRequest(BaseModel):
     date:        date
     time:        time
     venue:       Optional[str] = None
+    location:    Optional[str] = None   # alias accepted from admin UI; mapped to venue in router
     category:    EventCategory  = EventCategory.technical
     totalSlots:  int            = Field(100, ge=1)
+    form_url:    Optional[str] = None   # Google Form registration URL
+
+
+class UpdateEventRequest(BaseModel):
+    """All fields optional — supports partial updates from the admin panel."""
+    title:       Optional[str]          = Field(None, min_length=3, max_length=300)
+    description: Optional[str]          = None
+    date:        Optional[date]         = None
+    time:        Optional[time]         = None
+    venue:       Optional[str]          = None
+    location:    Optional[str]          = None   # frontend sends "location"; router maps → venue
+    category:    Optional[EventCategory] = None
+    totalSlots:  Optional[int]          = Field(None, ge=1)
+    form_url:    Optional[str]          = None   # Google Form registration URL
 
 
 class EventResponse(BaseModel):
@@ -223,6 +238,7 @@ class EventResponse(BaseModel):
     totalSlots:      int
     registeredCount: int
     createdBy:       Optional[str] = None
+    formUrl:         Optional[str] = None   # Google Form link surfaced to both admin UI and mobile app
 
     model_config = {"from_attributes": False}
 
@@ -243,6 +259,7 @@ class EventResponse(BaseModel):
             totalSlots=obj.total_slots,
             registeredCount=obj.registered_count,
             createdBy=obj.creator.name if obj.creator else None,
+            formUrl=getattr(obj, "form_url", None),
         )
 
 

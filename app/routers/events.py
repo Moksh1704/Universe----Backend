@@ -31,6 +31,21 @@ def create_event_admin(
     return EventResponse.from_orm_with_user(event, None)
 
 
+@router.delete("/admin/{event_id}", response_model=MessageResponse)
+def delete_event_admin(
+    event_id: str,
+    db: Session = Depends(get_db),
+):
+    """Admin dev route: Delete event without authentication."""
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    db.delete(event)
+    db.commit()
+    return MessageResponse(message="Event deleted", success=True)
+
+
 @router.post("", response_model=EventResponse, status_code=status.HTTP_201_CREATED)
 def create_event(
     payload: CreateEventRequest,
@@ -216,7 +231,7 @@ def delete_event(
     _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Admin: Delete event."""
+    """Admin: Delete event (authenticated)."""
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
