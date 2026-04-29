@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     # =========================
     # Comma-separated list of allowed origins.
     # Example for Render: ALLOWED_ORIGINS=https://your-app.com,https://www.your-app.com
-    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:5173,https://uniadminwebsite.netlify.app"
 
     @property
     def allowed_origins_list(self) -> List[str]:

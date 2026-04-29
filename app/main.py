@@ -139,7 +139,7 @@ Get your token from `POST /auth/login`, then use `Authorization: Bearer <token>`
 # browsers per the CORS spec and can cause silent auth failures in Expo/web.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins_list,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
