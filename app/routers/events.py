@@ -28,8 +28,13 @@ def create_event_admin(
     location   -> venue        (frontend may send either name)
     totalSlots -> total_slots  (defaults to 100 if omitted)
     time       -> optional     (stored as None if not provided)
+
+    Duplicate policy: NONE — same title on same date is allowed.
+    If your DB has a unique index on (title, date) or (title),
+    drop it with:  DROP INDEX <index_name>;
+    Find it with:  SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'events';
     """
-    venue       = payload.location or payload.venue          # accept either field name
+    venue       = payload.location or payload.venue
     total_slots = payload.totalSlots if payload.totalSlots is not None else 100
 
     event = Event(
