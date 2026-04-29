@@ -211,6 +211,36 @@ class CreateEventRequest(BaseModel):
     totalSlots:  int             = Field(100, ge=1)
     form_url:    Optional[str]  = None          # Google Form registration URL
 
+    @field_validator("date", mode="before")
+    @classmethod
+    def parse_date(cls, v: Any) -> Any:
+        """Accept 'YYYY-MM-DD' strings from the frontend — Pydantic v2 needs this coercion."""
+        if isinstance(v, str):
+            from datetime import date as _date
+            try:
+                return _date.fromisoformat(v)
+            except ValueError:
+                raise ValueError(f"Invalid date format '{v}'. Expected YYYY-MM-DD.")
+        return v
+
+    @field_validator("time", mode="before")
+    @classmethod
+    def parse_time(cls, v: Any) -> Any:
+        """Accept 'HH:MM' or 'HH:MM:SS' strings — frontend typically omits seconds."""
+        if v is None or v == "":
+            return None
+        if isinstance(v, str):
+            from datetime import time as _time
+            # Try HH:MM:SS first, then HH:MM (most common from frontend)
+            for fmt in ("%H:%M:%S", "%H:%M"):
+                try:
+                    from datetime import datetime
+                    return datetime.strptime(v, fmt).time()
+                except ValueError:
+                    continue
+            raise ValueError(f"Invalid time format '{v}'. Expected HH:MM or HH:MM:SS.")
+        return v
+
     @field_validator("category", mode="before")
     @classmethod
     def normalise_category(cls, v: str) -> str:
@@ -230,13 +260,41 @@ class UpdateEventRequest(BaseModel):
     totalSlots:  Optional[int]          = Field(None, ge=1)
     form_url:    Optional[str]          = None   # Google Form registration URL
 
+    @field_validator("date", mode="before")
+    @classmethod
+    def parse_date(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            from datetime import date as _date
+            try:
+                return _date.fromisoformat(v)
+            except ValueError:
+                raise ValueError(f"Invalid date format '{v}'. Expected YYYY-MM-DD.")
+        return v
+
+    @field_validator("time", mode="before")
+    @classmethod
+    def parse_time(cls, v: Any) -> Any:
+        if v is None or v == "":
+            return None
+        if isinstance(v, str):
+            from datetime import datetime
+            for fmt in ("%H:%M:%S", "%H:%M"):
+                try:
+                    return datetime.strptime(v, fmt).time()
+                except ValueError:
+                    continue
+            raise ValueError(f"Invalid time format '{v}'. Expected HH:MM or HH:MM:SS.")
+        return v
+
 
 class EventResponse(BaseModel):
     """Matches frontend shape: { id, title, date, time, venue, description, category, registered, … }"""
     id:              UUID
     title:           str
     date:            date
-    time:            time
+    time:            Optional[time] = None  # nullable — not all events have a set time
     venue:           Optional[str]
     description:     Optional[str]
     category:        str
