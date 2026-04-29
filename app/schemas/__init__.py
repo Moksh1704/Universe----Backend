@@ -306,6 +306,18 @@ class EventResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @field_validator("time", mode="before")
+    @classmethod
+    def coerce_time(cls, v: Any) -> Optional[str]:
+        """Convert datetime.time → 'HH:MM' string. Accepts str, datetime.time, or None."""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return v
+        if hasattr(v, "strftime"):          # datetime.time object
+            return v.strftime("%H:%M")
+        return str(v)
+
     @classmethod
     def from_orm_with_user(cls, obj: Any, user_id: Optional[UUID] = None) -> "EventResponse":
         registered = False
