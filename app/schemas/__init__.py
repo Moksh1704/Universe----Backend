@@ -294,7 +294,7 @@ class EventResponse(BaseModel):
     id:              UUID
     title:           str
     date:            date
-    time:            Optional[time] = None  # nullable — not all events have a set time
+    time:            Optional[str] = None  # nullable — not all events have a set time
     venue:           Optional[str]
     description:     Optional[str]
     category:        str
@@ -315,7 +315,7 @@ class EventResponse(BaseModel):
             id=obj.id,
             title=obj.title,
             date=obj.date,
-            time=obj.time,
+            time=obj.time.strftime("%H:%M") if obj.time else None,
             venue=obj.venue,
             description=obj.description,
             category=obj.category.value if hasattr(obj.category, "value") else obj.category,
