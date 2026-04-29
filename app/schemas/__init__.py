@@ -201,15 +201,21 @@ class AnnouncementResponse(BaseModel):
 # ══════════════════════════════════════════════════════════════════════════════
 
 class CreateEventRequest(BaseModel):
-    title:       str            = Field(..., min_length=3, max_length=300)
-    description: Optional[str] = None
-    date:        date
-    time:        time
-    venue:       Optional[str] = None
-    location:    Optional[str] = None   # alias accepted from admin UI; mapped to venue in router
+    title:       str             = Field(..., min_length=3, max_length=300)
+    description: Optional[str]  = None
+    date:        date                           # required — frontend always sends this
+    time:        Optional[time] = None          # optional — defaults to None if omitted or null
+    venue:       Optional[str]  = None
+    location:    Optional[str]  = None          # alias from admin UI; router maps → venue
     category:    EventCategory  = EventCategory.technical
-    totalSlots:  int            = Field(100, ge=1)
-    form_url:    Optional[str] = None   # Google Form registration URL
+    totalSlots:  int             = Field(100, ge=1)
+    form_url:    Optional[str]  = None          # Google Form registration URL
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalise_category(cls, v: str) -> str:
+        """Accept any casing from frontend — 'Technical', 'TECHNICAL', 'technical' all work."""
+        return v.strip().lower() if isinstance(v, str) else v
 
 
 class UpdateEventRequest(BaseModel):

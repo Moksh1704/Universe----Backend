@@ -21,17 +21,25 @@ def create_event_admin(
     payload: CreateEventRequest,
     db: Session = Depends(get_db),
 ):
-    """Admin dev route: Create event without authentication."""
-    # Accept either "venue" or "location" from the frontend
-    venue = payload.venue or payload.location
+    """Admin dev route: Create event without authentication.
+
+    Field mapping
+    -------------
+    location   -> venue        (frontend may send either name)
+    totalSlots -> total_slots  (defaults to 100 if omitted)
+    time       -> optional     (stored as None if not provided)
+    """
+    venue       = payload.location or payload.venue          # accept either field name
+    total_slots = payload.totalSlots if payload.totalSlots is not None else 100
+
     event = Event(
         title=payload.title,
         description=payload.description,
         date=payload.date,
-        time=payload.time,
+        time=payload.time,          # None is fine if the column is nullable
         venue=venue,
         category=payload.category,
-        total_slots=payload.totalSlots,
+        total_slots=total_slots,
         form_url=payload.form_url,
     )
     db.add(event)
@@ -129,7 +137,9 @@ def create_event(
     db: Session = Depends(get_db),
 ):
     """Create event (Faculty/Admin only)."""
-    venue = payload.venue or payload.location
+    venue       = payload.location or payload.venue
+    total_slots = payload.totalSlots if payload.totalSlots is not None else 100
+
     event = Event(
         title=payload.title,
         description=payload.description,
@@ -137,7 +147,7 @@ def create_event(
         time=payload.time,
         venue=venue,
         category=payload.category,
-        total_slots=payload.totalSlots,
+        total_slots=total_slots,
         created_by=current_user.id,
         form_url=payload.form_url,
     )
