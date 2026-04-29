@@ -180,6 +180,7 @@ class Event(Base):
     total_slots      = Column(Integer, default=100)
     registered_count = Column(Integer, default=0)
     image_url        = Column(String(500), nullable=True)
+    form_url         = Column(String(500), nullable=True)   # ← ADDED: Google Form registration URL
     created_by       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at       = Column(DateTime, default=datetime.utcnow)
 
