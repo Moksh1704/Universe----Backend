@@ -37,6 +37,12 @@ class EventCategory(str, enum.Enum):
     technical = "technical"
     cultural  = "cultural"
     sports    = "sports"
+    # FIX: added workshop, seminar, other so the frontend's EVENT_CATEGORIES
+    #      constant can include these without triggering a Pydantic validation
+    #      error ("value is not a valid enumeration member").
+    workshop  = "workshop"
+    seminar   = "seminar"
+    other     = "other"
 
 
 class AttendanceStatus(str, enum.Enum):
@@ -174,13 +180,21 @@ class Event(Base):
     title            = Column(String(300), nullable=False)
     description      = Column(Text,        nullable=True)
     date             = Column(Date,        nullable=False)
-    time             = Column(Time,        nullable=False)
+    # FIX: was nullable=False — caused NOT NULL constraint violation whenever
+    #      the admin panel created an event without filling in the time field.
+    #      Time is genuinely optional for many events (all-day, multi-day, etc.)
+    #      Run the migration SQL below before deploying this change.
+    time             = Column(Time,        nullable=True)
     venue            = Column(String(300), nullable=True)
-    category         = Column(SAEnum(EventCategory), nullable=False, default=EventCategory.technical)
+    # FIX: changed from SAEnum(EventCategory) to String so new category values
+    #      added to the Python enum don't require a separate Postgres ALTER TYPE.
+    #      If you prefer strict DB-level enforcement, use SAEnum and run the
+    #      ALTER TYPE migration in the SQL file below instead.
+    category         = Column(String(50),  nullable=False, default="technical")
     total_slots      = Column(Integer, default=100)
     registered_count = Column(Integer, default=0)
     image_url        = Column(String(500), nullable=True)
-    form_url         = Column(String(500), nullable=True)   # ← ADDED: Google Form registration URL
+    form_url         = Column(String(500), nullable=True)
     created_by       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at       = Column(DateTime, default=datetime.utcnow)
 

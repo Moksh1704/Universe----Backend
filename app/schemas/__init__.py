@@ -201,15 +201,19 @@ class AnnouncementResponse(BaseModel):
 # ══════════════════════════════════════════════════════════════════════════════
 
 class CreateEventRequest(BaseModel):
-    title:       str             = Field(..., min_length=3, max_length=300)
-    description: Optional[str]  = None
-    date:        date                           # required — frontend always sends this
-    time:        Optional[time] = None          # optional — defaults to None if omitted or null
-    venue:       Optional[str]  = None
-    location:    Optional[str]  = None          # alias from admin UI; router maps → venue
-    category:    EventCategory  = EventCategory.technical
-    totalSlots:  int             = Field(100, ge=1)
-    form_url:    Optional[str]  = None          # Google Form registration URL
+    title:       str            = Field(..., min_length=3, max_length=300)
+    description: Optional[str] = None
+    date:        date                            # required — frontend always sends this
+    time:        Optional[time] = None           # optional — DB column is now nullable
+    venue:       Optional[str] = None
+    location:    Optional[str] = None            # alias from admin UI; router maps → venue
+    # FIX: changed from EventCategory enum type to str so that category values
+    #      not yet in the Python enum (e.g. "workshop", "seminar") don't cause
+    #      a 422 Unprocessable Entity. The normalise_category validator below
+    #      lowercases the value; the DB column is now String(50).
+    category:    str            = Field("technical")
+    totalSlots:  int            = Field(100, ge=1)
+    form_url:    Optional[str] = None            # Google Form registration URL
 
     @field_validator("date", mode="before")
     @classmethod
@@ -226,12 +230,13 @@ class CreateEventRequest(BaseModel):
     @field_validator("time", mode="before")
     @classmethod
     def parse_time(cls, v: Any) -> Any:
-        """Accept 'HH:MM' or 'HH:MM:SS' strings — frontend typically omits seconds."""
+        """
+        Accept 'HH:MM' or 'HH:MM:SS' strings — frontend typically omits seconds.
+        Empty string and None both map to None (column is nullable).
+        """
         if v is None or v == "":
             return None
         if isinstance(v, str):
-            from datetime import time as _time
-            # Try HH:MM:SS first, then HH:MM (most common from frontend)
             for fmt in ("%H:%M:%S", "%H:%M"):
                 try:
                     from datetime import datetime
@@ -243,22 +248,37 @@ class CreateEventRequest(BaseModel):
 
     @field_validator("category", mode="before")
     @classmethod
-    def normalise_category(cls, v: str) -> str:
-        """Accept any casing from frontend — 'Technical', 'TECHNICAL', 'technical' all work."""
-        return v.strip().lower() if isinstance(v, str) else v
+    def normalise_category(cls, v: Any) -> str:
+        """
+        Accept any casing — 'Technical', 'TECHNICAL', 'technical' all work.
+        Also validates that the value is a known category to give a clear error
+        instead of silently inserting garbage into the DB.
+        """
+        if not isinstance(v, str):
+            raise ValueError("category must be a string")
+        normalised = v.strip().lower()
+        valid = {c.value for c in EventCategory}
+        if normalised not in valid:
+            raise ValueError(
+                f"Invalid category '{normalised}'. "
+                f"Must be one of: {', '.join(sorted(valid))}"
+            )
+        return normalised
 
 
 class UpdateEventRequest(BaseModel):
     """All fields optional — supports partial updates from the admin panel."""
-    title:       Optional[str]          = Field(None, min_length=3, max_length=300)
-    description: Optional[str]          = None
-    date:        Optional[date]         = None
-    time:        Optional[time]         = None
-    venue:       Optional[str]          = None
-    location:    Optional[str]          = None   # frontend sends "location"; router maps → venue
-    category:    Optional[EventCategory] = None
-    totalSlots:  Optional[int]          = Field(None, ge=1)
-    form_url:    Optional[str]          = None   # Google Form registration URL
+    title:       Optional[str] = Field(None, min_length=3, max_length=300)
+    description: Optional[str] = None
+    date:        Optional[date] = None
+    time:        Optional[time] = None
+    venue:       Optional[str] = None
+    location:    Optional[str] = None    # frontend sends "location"; router maps → venue
+    # FIX: same as CreateEventRequest — use str instead of Optional[EventCategory]
+    #      so new category values don't break partial updates.
+    category:    Optional[str] = None
+    totalSlots:  Optional[int] = Field(None, ge=1)
+    form_url:    Optional[str] = None    # Google Form registration URL
 
     @field_validator("date", mode="before")
     @classmethod
@@ -288,21 +308,53 @@ class UpdateEventRequest(BaseModel):
             raise ValueError(f"Invalid time format '{v}'. Expected HH:MM or HH:MM:SS.")
         return v
 
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalise_category(cls, v: Any) -> Optional[str]:
+        """Same normalisation as CreateEventRequest — applied only when category is provided."""
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError("category must be a string")
+        normalised = v.strip().lower()
+        valid = {c.value for c in EventCategory}
+        if normalised not in valid:
+            raise ValueError(
+                f"Invalid category '{normalised}'. "
+                f"Must be one of: {', '.join(sorted(valid))}"
+            )
+        return normalised
+
 
 class EventResponse(BaseModel):
-    """Matches frontend shape: { id, title, date, time, venue, description, category, registered, … }"""
+    """
+    Matches frontend shape:
+    { id, title, date, time, venue, location, description, category,
+      registered, totalSlots, registeredCount, createdBy, formUrl }
+
+    Notes
+    -----
+    - `venue` is the canonical DB field; `location` is added as an alias so
+      the admin panel's openEdit() which reads `e.location || e.venue` always
+      finds a value regardless of which key it checks first.
+    - `time` is Optional[str] — serialised as "HH:MM" or null.
+    - `formUrl` maps from the DB's `form_url` column.
+    - `date` is serialised as "YYYY-MM-DD" string (Pydantic does this for
+      datetime.date automatically), which is what <input type="date"> expects.
+    """
     id:              UUID
     title:           str
     date:            date
-    time:            Optional[str] = None  # nullable — not all events have a set time
-    venue:           Optional[str]
-    description:     Optional[str]
+    time:            Optional[str] = None   # nullable — not all events have a set time
+    venue:           Optional[str] = None
+    location:        Optional[str] = None   # FIX: mirrors venue so frontend read of e.location works
+    description:     Optional[str] = None
     category:        str
-    registered:      bool         # whether the current user is registered
+    registered:      bool                   # whether the current user is registered
     totalSlots:      int
     registeredCount: int
     createdBy:       Optional[str] = None
-    formUrl:         Optional[str] = None   # Google Form link surfaced to both admin UI and mobile app
+    formUrl:         Optional[str] = None   # Google Form link — camelCase for JS frontend
 
     model_config = {"from_attributes": True}
 
@@ -314,7 +366,7 @@ class EventResponse(BaseModel):
             return None
         if isinstance(v, str):
             return v
-        if hasattr(v, "strftime"):          # datetime.time object
+        if hasattr(v, "strftime"):   # datetime.time object from SQLAlchemy
             return v.strftime("%H:%M")
         return str(v)
 
@@ -323,12 +375,14 @@ class EventResponse(BaseModel):
         registered = False
         if user_id:
             registered = any(str(s.id) == str(user_id) for s in obj.registered_students)
+        venue = obj.venue  # canonical field
         return cls(
             id=obj.id,
             title=obj.title,
             date=obj.date,
             time=obj.time.strftime("%H:%M") if obj.time else None,
-            venue=obj.venue,
+            venue=venue,
+            location=venue,             # FIX: duplicate so e.location works in frontend
             description=obj.description,
             category=obj.category.value if hasattr(obj.category, "value") else obj.category,
             registered=registered,
