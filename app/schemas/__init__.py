@@ -14,6 +14,8 @@ from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from app.models import UserRole, AnnouncementType, EventCategory, AttendanceStatus, JobStatus
 
+from app.schemas.events import UpdateEventRequest, EventResponse
+
 
 # ─── Base Config ──────────────────────────────────────────────────────────────
 
@@ -130,8 +132,8 @@ class UserProfileResponse(CamelModel):
     email:      str
     role:       UserRole
     avatar_url: Optional[str]   = Field(None, alias="avatarUrl")
-    nickname:   Optional[str]   = None          # short display name from master DB
-    is_active:  bool            = Field(True,  alias="isActive")
+    nickname:   Optional[str]   = None
+    is_active:  bool            = Field(True, alias="isActive")
     created_at: datetime        = Field(alias="createdAt")
 
     # Student fields
@@ -179,7 +181,7 @@ class AnnouncementResponse(BaseModel):
     body:      str
     type:      str
     date:      date
-    urgent:    bool             # frontend uses 'urgent', not 'isUrgent'
+    urgent:    bool
     createdBy: Optional[str] = None
 
     model_config = {"from_attributes": False}
@@ -204,22 +206,17 @@ class AnnouncementResponse(BaseModel):
 class CreateEventRequest(BaseModel):
     title:       str            = Field(..., min_length=3, max_length=300)
     description: Optional[str] = None
-    date:        date                            # required — frontend always sends this
-    time:        Optional[time] = None           # optional — DB column is now nullable
+    date:        date
+    time:        Optional[time] = None
     venue:       Optional[str] = None
-    location:    Optional[str] = None            # alias from admin UI; router maps → venue
-    # FIX: changed from EventCategory enum type to str so that category values
-    #      not yet in the Python enum (e.g. "workshop", "seminar") don't cause
-    #      a 422 Unprocessable Entity. The normalise_category validator below
-    #      lowercases the value; the DB column is now String(50).
+    location:    Optional[str] = None
     category:    str            = Field("technical")
     totalSlots:  int            = Field(100, ge=1)
-    form_url:    Optional[str] = None            # Google Form registration URL
+    form_url:    Optional[str] = None
 
     @field_validator("date", mode="before")
     @classmethod
     def parse_date(cls, v: Any) -> Any:
-        """Accept 'YYYY-MM-DD' strings from the frontend — Pydantic v2 needs this coercion."""
         if isinstance(v, str):
             from datetime import date as _date
             try:
@@ -231,10 +228,6 @@ class CreateEventRequest(BaseModel):
     @field_validator("time", mode="before")
     @classmethod
     def parse_time(cls, v: Any) -> Any:
-        """
-        Accept 'HH:MM' or 'HH:MM:SS' strings — frontend typically omits seconds.
-        Empty string and None both map to None (column is nullable).
-        """
         if v is None or v == "":
             return None
         if isinstance(v, str):
@@ -251,14 +244,19 @@ class CreateEventRequest(BaseModel):
 # ATTENDANCE SCHEMAS
 # ══════════════════════════════════════════════════════════════════════════════
 
+class AttendanceRecord(BaseModel):
+    registration_number: str
+    status:              AttendanceStatus
+
+
 class AttendanceMarkRequest(BaseModel):
-    subject:     str
-    date:        date
-    time_slot:   Optional[str] = None
-    section:     Optional[str] = None
-    year:        Optional[int] = None
-    department:  Optional[str] = None
-    records:     List["AttendanceRecord"]
+    subject:    str
+    date:       date
+    time_slot:  Optional[str] = None
+    section:    Optional[str] = None
+    year:       Optional[int] = None
+    department: Optional[str] = None
+    records:    List[AttendanceRecord]
 
     @field_validator("subject", mode="before")
     @classmethod
@@ -276,7 +274,6 @@ class AttendanceMarkResponse(BaseModel):
 
 
 class SubjectSummaryItem(BaseModel):
-    """Running totals per subject — used inside StudentAttendanceResponse."""
     subject:    str
     present:    int
     total:      int
@@ -284,13 +281,12 @@ class SubjectSummaryItem(BaseModel):
 
 
 class DayAttendanceItem(BaseModel):
-    """One class entry in a student's day-wise list."""
     date:      date
     subject:   str
     time_slot: Optional[str]
-    status:    str              # "present" | "absent"
-    section:   Optional[str]   = None
-    marked_by: Optional[str]   = None
+    status:    str
+    section:   Optional[str] = None
+    marked_by: Optional[str] = None
 
     model_config = {"from_attributes": False}
 
@@ -311,18 +307,6 @@ class DayAttendanceItem(BaseModel):
 
 
 class StudentAttendanceResponse(BaseModel):
-    """
-    Full attendance payload for GET /attendance/student/{student_id}.
-
-    Fields
-    ------
-    registration_number  – the queried student's reg number
-    overall_percentage   – aggregate across all subjects (unfiltered)
-    total_classes        – total across all subjects
-    attended_classes     – present count across all subjects
-    subjects             – per-subject breakdown (always full totals)
-    records              – day-wise list (filtered by month/year if requested)
-    """
     registration_number: str
     overall_percentage:  float
     total_classes:       int
@@ -364,7 +348,6 @@ class CommentResponse(BaseModel):
 
 
 class PostResponse(BaseModel):
-    """Matches frontend: { id, userName, userRole, content, timePosted, likes, comments }"""
     id:         UUID
     userName:   str
     userRole:   str
@@ -506,3 +489,56 @@ class NotificationResponse(BaseModel):
             isRead=obj.is_read,
             createdAt=obj.created_at.isoformat(),
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RE-EXPORTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+__all__ = [
+    # common
+    "MessageResponse",
+    "PaginatedResponse",
+    # auth
+    "RegisterRequest",
+    "LoginRequest",
+    "TokenResponse",
+    "RefreshTokenRequest",
+    "ChangePasswordRequest",
+    "EmailOnlyRequest",
+    "VerifyOtpRequest",
+    "ResetPasswordRequest",
+    "GoogleLoginRequest",
+    "ProfileDataResponse",
+    # user
+    "UserProfileResponse",
+    "UpdateProfileRequest",
+    "AdminUpdateUserRequest",
+    # announcements
+    "CreateAnnouncementRequest",
+    "AnnouncementResponse",
+    # events
+    "CreateEventRequest",
+    "UpdateEventRequest",
+    "EventResponse",
+    # attendance
+    "AttendanceRecord",
+    "AttendanceMarkRequest",
+    "AttendanceMarkResponse",
+    "SubjectSummaryItem",
+    "DayAttendanceItem",
+    "StudentAttendanceResponse",
+    # posts
+    "CreatePostRequest",
+    "CommentRequest",
+    "CommentResponse",
+    "PostResponse",
+    # timetable
+    "CreateTimetableRequest",
+    "TimetableResponse",
+    # jobs
+    "CreateJobRequest",
+    "JobResponse",
+    # notifications
+    "NotificationResponse",
+]
