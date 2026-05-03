@@ -83,13 +83,12 @@ class ProfileDataResponse(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    accessToken:         str
-    refreshToken:        str
-    tokenType:           str = "Bearer"
-    user:                "UserProfileResponse"
-    login_status:        Optional[str]  = Field(None, alias="loginStatus")
-    profile:             Optional[ProfileDataResponse] = None
-    forcePasswordChange: Optional[bool] = None
+    accessToken:  str
+    refreshToken: str
+    tokenType:    str = "Bearer"
+    user:         "UserProfileResponse"
+    login_status: Optional[str] = Field(None, alias="loginStatus")
+    profile:      Optional[ProfileDataResponse] = None
 
 
 class RefreshTokenRequest(BaseModel):
@@ -130,8 +129,8 @@ class UserProfileResponse(CamelModel):
     email:      str
     role:       UserRole
     avatar_url: Optional[str]   = Field(None, alias="avatarUrl")
-    nickname:   Optional[str]   = None
-    is_active:  bool            = Field(True, alias="isActive")
+    nickname:   Optional[str]   = None          # short display name from master DB
+    is_active:  bool            = Field(True,  alias="isActive")
     created_at: datetime        = Field(alias="createdAt")
 
     # Student fields
@@ -179,7 +178,7 @@ class AnnouncementResponse(BaseModel):
     body:      str
     type:      str
     date:      date
-    urgent:    bool
+    urgent:    bool             # frontend uses 'urgent', not 'isUrgent'
     createdBy: Optional[str] = None
 
     model_config = {"from_attributes": False}
@@ -204,17 +203,22 @@ class AnnouncementResponse(BaseModel):
 class CreateEventRequest(BaseModel):
     title:       str            = Field(..., min_length=3, max_length=300)
     description: Optional[str] = None
-    date:        date
-    time:        Optional[time] = None
-    venue:       Optional[str]  = None
-    location:    Optional[str]  = None
+    date:        date                            # required — frontend always sends this
+    time:        Optional[time] = None           # optional — DB column is now nullable
+    venue:       Optional[str] = None
+    location:    Optional[str] = None            # alias from admin UI; router maps → venue
+    # FIX: changed from EventCategory enum type to str so that category values
+    #      not yet in the Python enum (e.g. "workshop", "seminar") don't cause
+    #      a 422 Unprocessable Entity. The normalise_category validator below
+    #      lowercases the value; the DB column is now String(50).
     category:    str            = Field("technical")
     totalSlots:  int            = Field(100, ge=1)
-    form_url:    Optional[str]  = None
+    form_url:    Optional[str] = None            # Google Form registration URL
 
     @field_validator("date", mode="before")
     @classmethod
     def parse_date(cls, v: Any) -> Any:
+        """Accept 'YYYY-MM-DD' strings from the frontend — Pydantic v2 needs this coercion."""
         if isinstance(v, str):
             from datetime import date as _date
             try:
@@ -226,28 +230,55 @@ class CreateEventRequest(BaseModel):
     @field_validator("time", mode="before")
     @classmethod
     def parse_time(cls, v: Any) -> Any:
+        """
+        Accept 'HH:MM' or 'HH:MM:SS' strings — frontend typically omits seconds.
+        Empty string and None both map to None (column is nullable).
+        """
         if v is None or v == "":
             return None
         if isinstance(v, str):
             for fmt in ("%H:%M:%S", "%H:%M"):
                 try:
-                    from datetime import datetime as _datetime
-                    return _datetime.strptime(v, fmt).time()
+                    from datetime import datetime
+                    return datetime.strptime(v, fmt).time()
                 except ValueError:
                     continue
+            raise ValueError(f"Invalid time format '{v}'. Expected HH:MM or HH:MM:SS.")
         return v
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalise_category(cls, v: Any) -> str:
+        """
+        Accept any casing — 'Technical', 'TECHNICAL', 'technical' all work.
+        Also validates that the value is a known category to give a clear error
+        instead of silently inserting garbage into the DB.
+        """
+        if not isinstance(v, str):
+            raise ValueError("category must be a string")
+        normalised = v.strip().lower()
+        valid = {c.value for c in EventCategory}
+        if normalised not in valid:
+            raise ValueError(
+                f"Invalid category '{normalised}'. "
+                f"Must be one of: {', '.join(sorted(valid))}"
+            )
+        return normalised
 
 
 class UpdateEventRequest(BaseModel):
-    title:       Optional[str]  = Field(None, min_length=3, max_length=300)
-    description: Optional[str]  = None
+    """All fields optional — supports partial updates from the admin panel."""
+    title:       Optional[str] = Field(None, min_length=3, max_length=300)
+    description: Optional[str] = None
     date:        Optional[date] = None
     time:        Optional[time] = None
-    venue:       Optional[str]  = None
-    location:    Optional[str]  = None
-    category:    Optional[str]  = None
-    totalSlots:  Optional[int]  = Field(None, ge=1)
-    form_url:    Optional[str]  = None
+    venue:       Optional[str] = None
+    location:    Optional[str] = None    # frontend sends "location"; router maps → venue
+    # FIX: same as CreateEventRequest — use str instead of Optional[EventCategory]
+    #      so new category values don't break partial updates.
+    category:    Optional[str] = None
+    totalSlots:  Optional[int] = Field(None, ge=1)
+    form_url:    Optional[str] = None    # Google Form registration URL
 
     @field_validator("date", mode="before")
     @classmethod
@@ -268,95 +299,236 @@ class UpdateEventRequest(BaseModel):
         if v is None or v == "":
             return None
         if isinstance(v, str):
+            from datetime import datetime
             for fmt in ("%H:%M:%S", "%H:%M"):
                 try:
-                    from datetime import datetime as _datetime
-                    return _datetime.strptime(v, fmt).time()
+                    return datetime.strptime(v, fmt).time()
                 except ValueError:
                     continue
+            raise ValueError(f"Invalid time format '{v}'. Expected HH:MM or HH:MM:SS.")
         return v
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalise_category(cls, v: Any) -> Optional[str]:
+        """Same normalisation as CreateEventRequest — applied only when category is provided."""
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError("category must be a string")
+        normalised = v.strip().lower()
+        valid = {c.value for c in EventCategory}
+        if normalised not in valid:
+            raise ValueError(
+                f"Invalid category '{normalised}'. "
+                f"Must be one of: {', '.join(sorted(valid))}"
+            )
+        return normalised
 
 
 class EventResponse(BaseModel):
-    id:           UUID
-    title:        str
-    description:  Optional[str] = None
-    date:         date
-    time:         Optional[str] = None
-    venue:        Optional[str] = None
-    category:     str
-    totalSlots:   int
-    filledSlots:  int            = 0
-    form_url:     Optional[str] = None
-    createdBy:    Optional[str] = None
-    isRegistered: bool           = False
+    """
+    Matches frontend shape:
+    { id, title, date, time, venue, location, description, category,
+      registered, totalSlots, registeredCount, createdBy, formUrl }
 
-    model_config = {"from_attributes": False}
+    Notes
+    -----
+    - `venue` is the canonical DB field; `location` is added as an alias so
+      the admin panel's openEdit() which reads `e.location || e.venue` always
+      finds a value regardless of which key it checks first.
+    - `time` is Optional[str] — serialised as "HH:MM" or null.
+    - `formUrl` maps from the DB's `form_url` column.
+    - `date` is serialised as "YYYY-MM-DD" string (Pydantic does this for
+      datetime.date automatically), which is what <input type="date"> expects.
+    """
+    id:              UUID
+    title:           str
+    date:            date
+    time:            Optional[str] = None   # nullable — not all events have a set time
+    venue:           Optional[str] = None
+    location:        Optional[str] = None   # FIX: mirrors venue so frontend read of e.location works
+    description:     Optional[str] = None
+    category:        str
+    registered:      bool                   # whether the current user is registered
+    totalSlots:      int
+    registeredCount: int
+    createdBy:       Optional[str] = None
+    formUrl:         Optional[str] = None   # Google Form link — camelCase for JS frontend
+
+    model_config = {"from_attributes": True}
+
+    @field_validator("time", mode="before")
+    @classmethod
+    def coerce_time(cls, v: Any) -> Optional[str]:
+        """Convert datetime.time → 'HH:MM' string. Accepts str, datetime.time, or None."""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return v
+        if hasattr(v, "strftime"):   # datetime.time object from SQLAlchemy
+            return v.strftime("%H:%M")
+        return str(v)
 
     @classmethod
     def from_orm_with_user(cls, obj: Any, user_id: Optional[UUID] = None) -> "EventResponse":
-        is_registered = False
+        registered = False
         if user_id:
-            try:
-                is_registered = any(
-                    str(s.id) == str(user_id)
-                    for s in obj.registered_students
-                )
-            except Exception:
-                is_registered = False
-
-        filled = getattr(obj, "registered_count", None)
-        if filled is None:
-            try:
-                filled = len(obj.registered_students)
-            except Exception:
-                filled = 0
-
+            registered = any(str(s.id) == str(user_id) for s in obj.registered_students)
+        venue = obj.venue  # canonical field
         return cls(
             id=obj.id,
             title=obj.title,
-            description=obj.description,
             date=obj.date,
             time=obj.time.strftime("%H:%M") if obj.time else None,
-            venue=obj.venue,
+            venue=venue,
+            location=venue,             # FIX: duplicate so e.location works in frontend
+            description=obj.description,
             category=obj.category.value if hasattr(obj.category, "value") else obj.category,
+            registered=registered,
             totalSlots=obj.total_slots,
-            filledSlots=filled,
-            form_url=getattr(obj, "form_url", None),
-            createdBy=obj.creator.name if getattr(obj, "creator", None) else None,
-            isRegistered=is_registered,
+            registeredCount=obj.registered_count,
+            createdBy=obj.creator.name if obj.creator else None,
+            formUrl=getattr(obj, "form_url", None),
         )
-
-    @classmethod
-    def from_orm(cls, obj: Any) -> "EventResponse":
-        return cls.from_orm_with_user(obj, None)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ATTENDANCE SCHEMAS
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ── Legacy / existing schemas (kept for backward compat with existing router) ─
+
+class MarkAttendanceRequest(BaseModel):
+    """Single-student mark — used by the original /attendance endpoints."""
+    studentId: UUID
+    subject:   str
+    date:      date
+    status:    AttendanceStatus
+
+
+class BulkMarkAttendanceRequest(BaseModel):
+    """Bulk mark — used by /attendance/bulk."""
+    subject: str
+    date:    date
+    records: List[dict]     # [{registration_number, present}]
+
+
+class AttendanceResponse(BaseModel):
+    """Subject-wise running totals — { subject, present, total, percentage }"""
+    subject:    str
+    present:    int
+    total:      int
+    percentage: float
+
+    model_config = {"from_attributes": False}
+
+    @classmethod
+    def from_orm(cls, obj: Any) -> "AttendanceResponse":
+        return cls(
+            subject=obj.subject,
+            present=obj.attended_classes,
+            total=obj.total_classes,
+            percentage=round(obj.percentage, 2),
+        )
+
+
+class DayAttendanceResponse(BaseModel):
+    """One day-level record returned to the frontend."""
+    id:                 UUID
+    registrationNumber: str       # was studentId: UUID — supports unregistered students
+    date:               date
+    subject:            str
+    status:             str
+    markedBy:           Optional[str] = None
+
+    model_config = {"from_attributes": False}
+
+    @classmethod
+    def from_orm(cls, obj: Any) -> "DayAttendanceResponse":
+        return cls(
+            id=obj.id,
+            registrationNumber=obj.registration_number,
+            date=obj.date,
+            subject=obj.subject,
+            status=obj.status.value if hasattr(obj.status, "value") else obj.status,
+            markedBy=obj.faculty.name if obj.faculty else None,
+        )
+
+
+class AttendanceSummaryResponse(BaseModel):
+    studentId:         str          # str (not UUID) — supports unregistered students
+    studentName:       str
+    overallPercentage: float
+    subjects:          List[AttendanceResponse]
+
+
+# ── New schemas for POST /attendance/mark and GET /attendance/student/{id} ────
+
 class AttendanceRecord(BaseModel):
-    registration_number: str
-    status:              AttendanceStatus
+    """
+    One student's status inside a bulk-mark request.
+    Used by AttendanceMarkRequest below.
+    """
+    student_id: str = Field(
+        ...,
+        min_length=1,
+        description="Student registration number, e.g. '22B01A1234'",
+    )
+    status: str = Field(..., description="'present' or 'absent'")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in ("present", "absent"):
+            raise ValueError("status must be 'present' or 'absent'")
+        return v
+
+    @field_validator("student_id")
+    @classmethod
+    def validate_student_id(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("student_id cannot be blank")
+        return v
 
 
 class AttendanceMarkRequest(BaseModel):
-    subject:    str
-    date:       date
-    time_slot:  Optional[str] = None
-    section:    Optional[str] = None
-    year:       Optional[int] = None
-    department: Optional[str] = None
-    records:    List[AttendanceRecord]
+    """
+    Payload for POST /attendance/mark.
 
-    @field_validator("subject", mode="before")
+    Example
+    -------
+    {
+        "section_id": "CSE06",
+        "subject":    "Data Structures",
+        "date":       "2026-04-19",
+        "time_slot":  "9:00-10:40",
+        "year":       2,
+        "attendance": [
+            { "student_id": "22B01A1234", "status": "present" },
+            { "student_id": "22B01A1235", "status": "absent"  }
+        ]
+    }
+    """
+    section_id: str            = Field(..., min_length=1, description="Section code, e.g. 'CSE06'")
+    subject:    str            = Field(..., min_length=1, max_length=200)
+    date:       date
+    time_slot:  Optional[str]  = Field(None, description="Period string, e.g. '9:00-10:40'")
+    year:       Optional[int]  = Field(None, ge=1, le=6)
+    attendance: List[AttendanceRecord] = Field(..., min_length=1)
+
+    @field_validator("section_id")
+    @classmethod
+    def normalise_section(cls, v: str) -> str:
+        """'CSE 06' → 'CSE06'"""
+        return v.replace(" ", "").upper()
+
+    @field_validator("subject")
     @classmethod
     def strip_subject(cls, v: str) -> str:
         return v.strip()
-
-# Alias — attendance.py router imports this name
-MarkAttendanceRequest = AttendanceMarkRequest
 
 
 class AttendanceMarkResponse(BaseModel):
@@ -367,11 +539,9 @@ class AttendanceMarkResponse(BaseModel):
     updated: int  = Field(..., description="Existing records updated (status changed)")
     skipped: int  = Field(..., description="Records with no change (skipped)")
 
-# Alias
-MarkAttendanceResponse = AttendanceMarkResponse
-
 
 class SubjectSummaryItem(BaseModel):
+    """Running totals per subject — used inside StudentAttendanceResponse."""
     subject:    str
     present:    int
     total:      int
@@ -379,12 +549,13 @@ class SubjectSummaryItem(BaseModel):
 
 
 class DayAttendanceItem(BaseModel):
+    """One class entry in a student's day-wise list."""
     date:      date
     subject:   str
     time_slot: Optional[str]
-    status:    str
-    section:   Optional[str] = None
-    marked_by: Optional[str] = None
+    status:    str              # "present" | "absent"
+    section:   Optional[str]   = None
+    marked_by: Optional[str]   = None
 
     model_config = {"from_attributes": False}
 
@@ -405,6 +576,18 @@ class DayAttendanceItem(BaseModel):
 
 
 class StudentAttendanceResponse(BaseModel):
+    """
+    Full attendance payload for GET /attendance/student/{student_id}.
+
+    Fields
+    ------
+    registration_number  – the queried student's reg number
+    overall_percentage   – aggregate across all subjects (unfiltered)
+    total_classes        – total across all subjects
+    attended_classes     – present count across all subjects
+    subjects             – per-subject breakdown (always full totals)
+    records              – day-wise list (filtered by month/year if requested)
+    """
     registration_number: str
     overall_percentage:  float
     total_classes:       int
@@ -446,6 +629,7 @@ class CommentResponse(BaseModel):
 
 
 class PostResponse(BaseModel):
+    """Matches frontend: { id, userName, userRole, content, timePosted, likes, comments }"""
     id:         UUID
     userName:   str
     userRole:   str
@@ -587,48 +771,3 @@ class NotificationResponse(BaseModel):
             isRead=obj.is_read,
             createdAt=obj.created_at.isoformat(),
         )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# RE-EXPORTS
-# ══════════════════════════════════════════════════════════════════════════════
-
-__all__ = [
-    "MessageResponse",
-    "PaginatedResponse",
-    "RegisterRequest",
-    "LoginRequest",
-    "TokenResponse",
-    "RefreshTokenRequest",
-    "ChangePasswordRequest",
-    "EmailOnlyRequest",
-    "VerifyOtpRequest",
-    "ResetPasswordRequest",
-    "GoogleLoginRequest",
-    "ProfileDataResponse",
-    "UserProfileResponse",
-    "UpdateProfileRequest",
-    "AdminUpdateUserRequest",
-    "CreateAnnouncementRequest",
-    "AnnouncementResponse",
-    "CreateEventRequest",
-    "UpdateEventRequest",
-    "EventResponse",
-    "AttendanceRecord",
-    "AttendanceMarkRequest",
-    "MarkAttendanceRequest",       # alias
-    "AttendanceMarkResponse",
-    "MarkAttendanceResponse",      # alias
-    "SubjectSummaryItem",
-    "DayAttendanceItem",
-    "StudentAttendanceResponse",
-    "CreatePostRequest",
-    "CommentRequest",
-    "CommentResponse",
-    "PostResponse",
-    "CreateTimetableRequest",
-    "TimetableResponse",
-    "CreateJobRequest",
-    "JobResponse",
-    "NotificationResponse",
-]
