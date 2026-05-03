@@ -355,6 +355,9 @@ class AttendanceMarkRequest(BaseModel):
     def strip_subject(cls, v: str) -> str:
         return v.strip()
 
+# Alias — attendance.py router imports this name
+MarkAttendanceRequest = AttendanceMarkRequest
+
 
 class AttendanceMarkResponse(BaseModel):
     """Return value for POST /attendance/mark."""
@@ -363,6 +366,9 @@ class AttendanceMarkResponse(BaseModel):
     created: int  = Field(..., description="New records inserted")
     updated: int  = Field(..., description="Existing records updated (status changed)")
     skipped: int  = Field(..., description="Records with no change (skipped)")
+
+# Alias
+MarkAttendanceResponse = AttendanceMarkResponse
 
 
 class SubjectSummaryItem(BaseModel):
@@ -610,7 +616,9 @@ __all__ = [
     "EventResponse",
     "AttendanceRecord",
     "AttendanceMarkRequest",
+    "MarkAttendanceRequest",       # alias
     "AttendanceMarkResponse",
+    "MarkAttendanceResponse",      # alias
     "SubjectSummaryItem",
     "DayAttendanceItem",
     "StudentAttendanceResponse",
