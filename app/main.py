@@ -16,11 +16,6 @@ from app.config import settings
 from app.database import engine, Base
 
 # ── Startup validation ────────────────────────────────────────────────────────
-# Catches the most common Render misconfiguration: setting DEFAULT_PASSWORD or
-# FACULTY_DEFAULT_PASSWORD to a bcrypt hash string instead of a plain password.
-# This causes passlib to raise "password cannot be longer than 72 bytes" at
-# runtime and corrupts every user row created during the affected window.
-
 _BCRYPT_RE = re.compile(r"^\$2[abxy]\$\d{2}\$.{53}$")
 
 
@@ -57,29 +52,42 @@ import app.models  # noqa: F401
 # ── Import routers ────────────────────────────────────────────────────────────
 from app.routers import (
     auth, users, announcements, events,
-    # attendance,    ← v1 PERMANENTLY DISABLED — DO NOT re-enable
-    #                  Conflicts with attendance_v2 on the /attendance prefix,
-    #                  causing duplicate route registration and broken endpoints.
     posts, timetable, notifications,
-    # jobs,  # ← Placements disabled from Swagger — import kept for reference
 )
-from app.routers import faculty_timetable  # reads from faculty_db
-from app.routers import attendance_v2      # ← ONLY attendance router
-from app.routers.students import router as students_router  # GET /students
+from app.routers import faculty_timetable
+from app.routers import attendance_v2
+from app.routers.students import router as students_router
 
-# ── Create upload directory ───────────────────────────────────────────────────
-Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+# ── URL helper ────────────────────────────────────────────────────────────────
+def build_file_url(path: str) -> str:
+    """Convert a relative upload path to a full absolute URL.
 
-# ── Lifespan: DB table creation moved here from module level ─────────────────
-# CRITICAL FIX: create_all() must NOT run at module import time.
-# When DATABASE URLs are missing or invalid, calling create_all() at module
-# level causes SQLAlchemy to raise an unhandled exception during uvicorn's
-# import phase — before any request context exists. Uvicorn catches this as a
-# fatal error, logs "Shutting down", and restarts. Moving it into lifespan
-# ensures it runs after env vars are loaded and produces a clean error message.
+    Handles both already-absolute URLs (passthrough) and relative paths.
+    Example:
+        "/uploads/avatars/foo.jpg"
+        → "https://universe-mainbackend.onrender.com/uploads/avatars/foo.jpg"
+    """
+    if not path:
+        return path
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
+    base = settings.BASE_URL.rstrip("/")
+    return f"{base}{path}"
+
+
+# ── Ensure upload directories exist ──────────────────────────────────────────
+def _ensure_upload_dirs() -> None:
+    """Create uploads/ and uploads/avatars/ if they don't exist."""
+    for subdir in ("", "avatars"):
+        Path(settings.UPLOAD_DIR, subdir).mkdir(parents=True, exist_ok=True)
+    print(f"[STARTUP OK] Upload directories verified under '{settings.UPLOAD_DIR}'.", flush=True)
+
+
+_ensure_upload_dirs()
+
+# ── Lifespan ──────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── Startup ───────────────────────────────────────────────────────────────
     try:
         Base.metadata.create_all(bind=engine)
         print("[STARTUP OK] Database tables verified.", flush=True)
@@ -91,13 +99,12 @@ async def lifespan(app: FastAPI):
         )
         sys.exit(1)
     yield
-    # ── Shutdown (nothing needed) ─────────────────────────────────────────────
 
 
 # ── FastAPI App ───────────────────────────────────────────────────────────────
 app = FastAPI(
     title="UniVerse API",
-    lifespan=lifespan,   # ← lifespan replaces the bare create_all call
+    lifespan=lifespan,
     description="""
 ## 🎓 UniVerse – University Management System
 
@@ -134,9 +141,6 @@ Get your token from `POST /auth/login`, then use `Authorization: Bearer <token>`
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-# Uses the explicit allowlist from settings instead of wildcard "*".
-# allow_origins=["*"] combined with allow_credentials=True is rejected by
-# browsers per the CORS spec and can cause silent auth failures in Expo/web.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -159,8 +163,6 @@ async def integrity_error_handler(request: Request, exc: IntegrityError):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    # DEBUG=true in .env exposes traces locally; production always returns a
-    # generic message so internal details are never leaked to clients.
     if settings.DEBUG:
         import traceback
         return JSONResponse(
@@ -180,15 +182,13 @@ app.include_router(announcements.router)
 app.include_router(events.router)
 
 # ⚠️  attendance.router (v1) is INTENTIONALLY NOT registered here.
-#     It shares the /attendance prefix with attendance_v2 and will cause
-#     duplicate-route conflicts and broken behavior if re-added.
 #     All attendance traffic is handled exclusively by attendance_v2.router.
-app.include_router(attendance_v2.router)   # ← ONLY attendance router
+app.include_router(attendance_v2.router)
 
 app.include_router(posts.router)
-app.include_router(timetable.router)           # student timetable (student_db)
-app.include_router(faculty_timetable.router)   # faculty timetable (faculty_db)
-app.include_router(students_router)            # GET /students
+app.include_router(timetable.router)
+app.include_router(faculty_timetable.router)
+app.include_router(students_router)
 # app.include_router(jobs.router)  # ← Placements hidden from Swagger; files untouched
 app.include_router(notifications.router)
 
